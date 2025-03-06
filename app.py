@@ -4,42 +4,70 @@ from tkinter import ttk, filedialog, messagebox
 from db import init_db, save_exam, save_processed_question, get_exams, get_exam_details, get_processed_questions
 import PyPDF2
 import docx
+from datetime import datetime
+import logging
+
+# 设置日志
+logger = logging.getLogger(__name__)
 
 class ExamApp:
     def __init__(self, root):
         self.root = root
         self.root.title("试卷处理系统")
         
+        # 设置窗口大小和位置
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         window_width = screen_width
         window_height = screen_height - 80
         self.root.geometry(f"{window_width}x{window_height}+0+0")
         
+        # 初始化数据库
         init_db()
         
-        self.main_frame = ttk.Frame(root, padding="10")
+        # 创建主框架
+        self.setup_main_frame()
+        self.setup_upload_area()
+        self.setup_exam_list()
+        self.setup_detail_tabs()
+        self.setup_action_buttons()
+        
+        # 加载试卷列表
+        self.load_exams()
+        
+        # 设置进度条
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.main_frame, 
+                                          variable=self.progress_var,
+                                          maximum=100)
+        self.progress_bar.grid(row=7, column=0, columnspan=4, 
+                             sticky=(tk.W, tk.E), pady=5)
+        self.progress_bar.grid_remove()  # 默认隐藏
+        
+    def setup_main_frame(self):
+        self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self.main_frame.columnconfigure(0, weight=1)
-        self.main_frame.columnconfigure(1, weight=1)
-        self.main_frame.columnconfigure(2, weight=1)
-        self.main_frame.columnconfigure(3, weight=1)
+        for i in range(4):
+            self.main_frame.columnconfigure(i, weight=1)
         self.main_frame.rowconfigure(5, weight=1)
-        
-        # 上传区域 - 第一行
+    
+    def setup_upload_area(self):
+        # 第一行
         ttk.Label(self.main_frame, text="试题年份:").grid(row=0, column=0, sticky=tk.W)
-        self.year_var = tk.StringVar(value="2023")
+        self.year_var = tk.StringVar(value=str(datetime.now().year))
+        years = [str(year) for year in range(2021, datetime.now().year + 2)]
         ttk.Combobox(self.main_frame, textvariable=self.year_var, 
-                    values=["2021", "2022", "2023", "2024", "2025"], state="readonly").grid(row=0, column=1, sticky=(tk.W, tk.E))
+                    values=years, state="readonly").grid(row=0, column=1, sticky=(tk.W, tk.E))
         
         ttk.Label(self.main_frame, text="试题月份:").grid(row=0, column=2, sticky=tk.W)
-        self.month_var = tk.StringVar(value="3月")
+        self.month_var = tk.StringVar(value="3")
         ttk.Combobox(self.main_frame, textvariable=self.month_var, 
-                    values=["3月", "6月", "9月", "12月"], state="readonly").grid(row=0, column=3, sticky=(tk.W, tk.E))
+                    values=["3", "6", "9", "12"], state="readonly").grid(row=0, column=3, sticky=(tk.W, tk.E))
         
+        # 第二行
         ttk.Label(self.main_frame, text="试题级别:").grid(row=1, column=0, sticky=tk.W)
         self.level_var = tk.StringVar(value="1")
         ttk.Combobox(self.main_frame, textvariable=self.level_var, 
@@ -50,15 +78,18 @@ class ExamApp:
         ttk.Combobox(self.main_frame, textvariable=self.type_var, 
                     values=["Python", "C++"], state="readonly").grid(row=1, column=3, sticky=(tk.W, tk.E))
         
-        # 上传区域 - 第二行
+        # 第三行
         self.real_var = tk.BooleanVar()
         ttk.Checkbutton(self.main_frame, text="真题", variable=self.real_var).grid(row=2, column=0, sticky=tk.W)
         
         self.analysis_var = tk.BooleanVar()
         ttk.Checkbutton(self.main_frame, text="解析", variable=self.analysis_var).grid(row=2, column=1, sticky=tk.W)
         
-        ttk.Button(self.main_frame, text="上传试卷", command=self.upload_exam).grid(row=2, column=2, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        
+        # 上传按钮
+        upload_btn = ttk.Button(self.main_frame, text="上传试卷", command=self.upload_exam)
+        upload_btn.grid(row=2, column=2, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+    
+    def setup_exam_list(self):
         # 试卷列表
         ttk.Label(self.main_frame, text="已上传的试卷:").grid(row=3, column=0, sticky=tk.W)
         self.exam_list = ttk.Treeview(self.main_frame, columns=("id", "title", "subject", "date"), show="headings")
@@ -67,7 +98,8 @@ class ExamApp:
         self.exam_list.heading("subject", text="科目")
         self.exam_list.heading("date", text="上传日期")
         self.exam_list.grid(row=4, column=0, columnspan=4, sticky=(tk.W, tk.E))
-        
+    
+    def setup_detail_tabs(self):
         # 详情显示（使用选项卡）
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.grid(row=5, column=0, columnspan=4, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -87,14 +119,13 @@ class ExamApp:
         
         self.answer_text = tk.Text(self.answer_tab, height=20, width=80)
         self.answer_text.pack(fill=tk.BOTH, expand=True)
-        
+    
+    def setup_action_buttons(self):
         # 按钮
         ttk.Button(self.main_frame, text="刷新列表", command=self.load_exams).grid(row=6, column=0, pady=5)
         ttk.Button(self.main_frame, text="预览试卷", command=self.preview_exam).grid(row=6, column=1, pady=5)
         ttk.Button(self.main_frame, text="整理试题", command=self.process_exam).grid(row=6, column=2, pady=5)
         ttk.Button(self.main_frame, text="生成答案", command=self.generate_answers).grid(row=6, column=3, pady=5)
-        
-        self.load_exams()
     
     def load_exams(self):
         for item in self.exam_list.get_children():
@@ -135,34 +166,75 @@ class ExamApp:
         return content
     
     def upload_exam(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Supported files", "*.pdf *.docx *.doc *.txt")])
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Supported files", "*.pdf *.docx *.doc *.txt")]
+        )
         if not file_path:
             return
         
-        year = self.year_var.get()
-        month = self.month_var.get().replace("月", "")
-        level = self.level_var.get()
-        exam_type = self.type_var.get()
-        title = f"{year}-{month}-{level}-{exam_type}"
-        subject = f"真题: {self.real_var.get()}, 解析: {self.analysis_var.get()}"
-        
-        file_type = self.detect_file_type(file_path)
-        if file_type == 'unknown':
-            messagebox.showerror("错误", "不支持的文件格式")
-            return
-        
-        os.makedirs('uploads', exist_ok=True)
-        new_path = os.path.join('uploads', os.path.basename(file_path))
-        with open(file_path, 'rb') as src, open(new_path, 'wb') as dst:
-            dst.write(src.read())
-        
-        content = self.read_file_content(new_path, file_type)
-        exam_id = save_exam(title, subject, new_path, file_type)
-        print(f"保存试卷，ID: {exam_id}")
-        
-        self.load_exams()
-        self.show_preview(exam_id, content)
-        messagebox.showinfo("成功", f"已上传试卷 {title}")
+        try:
+            # 显示进度条
+            self.progress_bar.grid()
+            self.progress_var.set(0)
+            self.root.update()
+            
+            year = int(self.year_var.get())
+            month = int(self.month_var.get())
+            level = int(self.level_var.get())
+            exam_type = self.type_var.get()
+            title = f"{year}-{month}-{level}-{exam_type}"
+            subject = f"真题: {self.real_var.get()}, 解析: {self.analysis_var.get()}"
+            
+            self.progress_var.set(20)
+            self.root.update()
+            
+            file_type = self.detect_file_type(file_path)
+            if file_type == 'unknown':
+                messagebox.showerror("错误", "不支持的文件格式")
+                return
+            
+            # 创建上传目录
+            os.makedirs('uploads', exist_ok=True)
+            new_path = os.path.join('uploads', os.path.basename(file_path))
+            with open(file_path, 'rb') as src, open(new_path, 'wb') as dst:
+                dst.write(src.read())
+            
+            self.progress_var.set(50)
+            self.root.update()
+            
+            # 读取文件内容
+            content = self.read_file_content(new_path, file_type)
+            
+            self.progress_var.set(80)
+            self.root.update()
+            
+            # 保存到数据库
+            exam_id = save_exam(
+                title=title,
+                subject=subject,
+                year=year,
+                month=month,
+                level=level,
+                exam_type=exam_type,
+                is_real=self.real_var.get(),
+                has_analysis=self.analysis_var.get(),
+                file_path=new_path,
+                file_type=file_type
+            )
+            
+            self.progress_var.set(100)
+            self.root.update()
+            
+            # 刷新列表并显示预览
+            self.load_exams()
+            self.show_preview(exam_id, content)
+            messagebox.showinfo("成功", f"已上传试卷 {title}")
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"上传失败: {str(e)}")
+            logger.error(f"Upload error: {str(e)}")
+        finally:
+            self.progress_bar.grid_remove()
     
     def show_preview(self, exam_id, content):
         self.preview_text.delete(1.0, tk.END)
