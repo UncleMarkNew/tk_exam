@@ -1,7 +1,7 @@
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from db import init_db, save_exam, save_processed_question, get_exams, get_exam_details, get_processed_questions
+from db import init_db, save_exam, save_processed_question, get_exams, get_exam_details
 import PyPDF2
 import docx
 from datetime import datetime
