@@ -5,6 +5,8 @@ from db import init_db, save_exam, save_processed_question, get_exams, get_exam_
 import PyPDF2
 import docx
 from datetime import datetime
+from storage import FileStorage
+import shutil
 import logging
 
 # 设置日志
@@ -15,15 +17,18 @@ class ExamApp:
         self.root = root
         self.root.title("试卷处理系统")
         
+        # 初始化文件存储
+        self.storage = FileStorage('uploads')
+        
+        # 初始化数据库
+        init_db()
+        
         # 设置窗口大小和位置
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         window_width = screen_width
         window_height = screen_height - 80
         self.root.geometry(f"{window_width}x{window_height}+0+0")
-        
-        # 初始化数据库
-        init_db()
         
         # 创建主框架
         self.setup_main_frame()
@@ -166,47 +171,27 @@ class ExamApp:
         return content
     
     def upload_exam(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Supported files", "*.pdf *.docx *.doc *.txt")]
-        )
-        if not file_path:
-            return
-        
         try:
-            # 显示进度条
-            self.progress_bar.grid()
-            self.progress_var.set(0)
-            self.root.update()
+            file_path = filedialog.askopenfilename(
+                filetypes=[("Supported files", "*.pdf *.docx *.doc *.txt")]
+            )
+            if not file_path:
+                return
             
+            # 获取文件信息
+            file_name = os.path.basename(file_path)
+            file_type = os.path.splitext(file_name)[1].lower()
+            
+            # 保存文件到存储系统
+            stored_path = self.storage.save_file(file_path)
+            
+            # 获取试卷信息
             year = int(self.year_var.get())
             month = int(self.month_var.get())
             level = int(self.level_var.get())
             exam_type = self.type_var.get()
             title = f"{year}-{month}-{level}-{exam_type}"
             subject = f"真题: {self.real_var.get()}, 解析: {self.analysis_var.get()}"
-            
-            self.progress_var.set(20)
-            self.root.update()
-            
-            file_type = self.detect_file_type(file_path)
-            if file_type == 'unknown':
-                messagebox.showerror("错误", "不支持的文件格式")
-                return
-            
-            # 创建上传目录
-            os.makedirs('uploads', exist_ok=True)
-            new_path = os.path.join('uploads', os.path.basename(file_path))
-            with open(file_path, 'rb') as src, open(new_path, 'wb') as dst:
-                dst.write(src.read())
-            
-            self.progress_var.set(50)
-            self.root.update()
-            
-            # 读取文件内容
-            content = self.read_file_content(new_path, file_type)
-            
-            self.progress_var.set(80)
-            self.root.update()
             
             # 保存到数据库
             exam_id = save_exam(
@@ -218,16 +203,13 @@ class ExamApp:
                 exam_type=exam_type,
                 is_real=self.real_var.get(),
                 has_analysis=self.analysis_var.get(),
-                file_path=new_path,
+                file_path=stored_path,
                 file_type=file_type
             )
             
-            self.progress_var.set(100)
-            self.root.update()
-            
             # 刷新列表并显示预览
             self.load_exams()
-            self.show_preview(exam_id, content)
+            self.show_preview(exam_id, self.read_file_content(stored_path, file_type))
             messagebox.showinfo("成功", f"已上传试卷 {title}")
             
         except Exception as e:
@@ -245,23 +227,40 @@ class ExamApp:
         print(f"原始预览: {preview[:100]}...")
     
     def preview_exam(self):
-        selected = self.exam_list.selection()
-        if not selected:
-            messagebox.showwarning("警告", "请先选择一个试卷")
-            return
-        
-        exam_id = self.exam_list.item(selected[0])['values'][0]
-        exam, _ = get_exam_details(exam_id)
-        file_path = exam['file_path']
-        file_type = exam['file_type']
-        content = self.read_file_content(file_path, file_type)
-        
-        self.preview_text.delete(1.0, tk.END)
-        preview = f"试卷: {exam['title']} ({exam['subject']})\n上传日期: {exam['upload_date']}\n\n{content}"
-        self.preview_text.insert(tk.END, preview)
-        self.notebook.select(self.preview_tab)
-        self.root.update()
-        print(f"单独预览内容: {preview[:100]}...")
+        try:
+            selection = self.exam_list.selection()
+            if not selection:
+                messagebox.showwarning("提示", "请先选择一个试卷")
+                return
+                
+            exam_id = self.exam_list.item(selection[0])['values'][0]
+            exam, questions = get_exam_details(exam_id)
+            
+            if exam is None:
+                messagebox.showerror("错误", "无法获取试卷详情")
+                return
+                
+            preview_text = f"试卷ID: {exam['id']}\n\n"
+            
+            # 读取文件内容
+            file_path = exam['file_path']
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read(500)  # 只读取前500个字符
+                    preview_text += f"原始预览: {content}..."
+            else:
+                preview_text += "原始文件不存在\n"
+            
+            if questions:
+                preview_text += "\n\n处理后的题目:\n"
+                for q in questions[:3]:  # 只显示前3个题目
+                    preview_text += f"\n题号 {q['question_number']}: {q['content'][:100]}..."
+            
+            self.preview_text.delete('1.0', tk.END)
+            self.preview_text.insert('1.0', preview_text)
+        except Exception as e:
+            logger.error(f"Error in preview_exam: {str(e)}")
+            messagebox.showerror("错误", f"预览失败: {str(e)}")
     
     def process_exam(self):
         selected = self.exam_list.selection()
