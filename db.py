@@ -45,7 +45,11 @@ def init_db():
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # 原始试卷表
+        # 删除旧表（如果存在）
+        cursor.execute('DROP TABLE IF EXISTS processed_questions')
+        cursor.execute('DROP TABLE IF EXISTS exams')
+        
+        # 创建新表
         cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -62,7 +66,6 @@ def init_db():
             status TEXT DEFAULT 'pending',
             last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         
-        # 整理好的试题表
         cursor.execute('''CREATE TABLE IF NOT EXISTS processed_questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             exam_id INTEGER,
@@ -81,6 +84,7 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_exam_type ON exams(exam_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_question_exam_id ON processed_questions(exam_id)')
         
+        conn.commit()
         logger.info("Database initialized successfully")
 
 def save_exam(title, subject, year, month, level, exam_type, is_real, has_analysis, file_path, file_type):
